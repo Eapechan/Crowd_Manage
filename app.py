@@ -1,16 +1,20 @@
 # app.py
 # ─────────────────────────────────────────────────────────────────────────────
-# Streamlit Dashboard — Crowd Management System
+# Streamlit Dashboard  —  Crowd Management System
 #
-# Architecture:
-#   • Each script rerun = one video frame processed
-#   • st.rerun() drives the next frame (no blocking while-loop)
-#   • Heavy objects (detector / tracker / cap) live in session_state
-#   • Chart uses integer frame index — avoids Vega-Lite datetime crash
+# KEY DESIGN DECISIONS
+# ────────────────────
+# 1. One frame per script rerun  +  st.rerun()  (reactive Streamlit model)
+# 2. Frames displayed via base64 <img> HTML  — avoids Streamlit's
+#    MediaFileStorage which gets invalidated between reruns (buffering / crash)
+# 3. Deprecated use_container_width replaced with width='stretch'
+# 4. Chart uses integer frame index  — no datetime → no Vega-Lite crash
+# 5. Heavy objects (detector / tracker / cap) in session_state
 #
 # Usage:  streamlit run app.py
 # ─────────────────────────────────────────────────────────────────────────────
 
+import base64
 import time
 
 import cv2
@@ -23,7 +27,7 @@ from detection import PersonDetector
 from tracking  import PersonTracker
 from analysis  import CrowdAnalyzer
 
-# ── Page config (must be first) ───────────────────────────────────────────────
+# ── Page config (must be first Streamlit call) ────────────────────────────────
 st.set_page_config(
     page_title="Crowd Management System",
     page_icon="👥",
@@ -33,30 +37,22 @@ st.set_page_config(
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-body, .stApp           { background:#0d1117; color:#c9d1d9; }
-h1, h2, h3             { color:#58a6ff; }
-.metric-box {
-    border-radius:12px; padding:18px 22px; margin-bottom:10px;
-    background:#161b22; border:1px solid #30363d;
-}
-.alert-box {
-    border-radius:10px; padding:16px;
-    background:rgba(220,53,69,.18); border:1px solid #dc3545;
-    color:#ff8080; font-size:1.05rem; font-weight:600;
-}
-.safe-box {
-    border-radius:10px; padding:16px;
-    background:rgba(40,167,69,.15); border:1px solid #28a745;
-    color:#5cdb5c; font-size:1.05rem; font-weight:600;
-}
-[data-testid="stSidebar"] { background:#161b22; }
+body,.stApp{background:#0d1117;color:#c9d1d9;}
+h1,h2,h3{color:#58a6ff;}
+.metric-box{border-radius:12px;padding:18px 22px;margin-bottom:10px;
+            background:#161b22;border:1px solid #30363d;}
+.alert-box{border-radius:10px;padding:14px;background:rgba(220,53,69,.18);
+           border:1px solid #dc3545;color:#ff8080;font-size:1rem;font-weight:600;}
+.safe-box{border-radius:10px;padding:14px;background:rgba(40,167,69,.15);
+          border:1px solid #28a745;color:#5cdb5c;font-size:1rem;font-weight:600;}
+.live-img{width:100%;border-radius:10px;border:1px solid #30363d;}
+[data-testid="stSidebar"]{background:#161b22;}
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session-state defaults ────────────────────────────────────────────────────
+# ── Session-state bootstrap ───────────────────────────────────────────────────
 _DEFAULTS = dict(
-    running=False, frame_idx=0,
-    count_history=[],          # list of ints — safe for Vega-Lite
+    running=False, frame_idx=0, count_history=[],
     last_count=0, last_density="LOW", last_alert=False,
     detector=None, tracker=None, analyzer=None, cap=None,
 )
@@ -66,19 +62,19 @@ for k, v in _DEFAULTS.items():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("⚙️ Settings")
-
     locked = st.session_state.running
+
     src_type = st.radio("Input Source", ["Webcam", "Video File"], disabled=locked)
     if src_type == "Webcam":
         cam_idx = st.number_input("Camera Index", 0, 10, 0, step=1, disabled=locked)
         video_source: int | str = int(cam_idx)
     else:
-        vpath = st.text_input("Video File Path", placeholder="path/to/video.mp4",
-                               disabled=locked)
+        vpath = st.text_input("Video File Path",
+                               placeholder="path/to/video.mp4", disabled=locked)
         video_source = vpath or 0
 
     st.divider()
-    low_thr  = st.slider("LOW  threshold (<)",  1, 50,  config.LOW_THRESHOLD,  disabled=locked)
+    low_thr  = st.slider("LOW  threshold (<)",  1,  50, config.LOW_THRESHOLD,  disabled=locked)
     high_thr = st.slider("HIGH threshold (>)", low_thr+1, 100, config.HIGH_THRESHOLD, disabled=locked)
     conf_thr = st.slider("YOLO confidence",    0.1, 1.0, config.CONFIDENCE_THRESHOLD, 0.05, disabled=locked)
 
@@ -89,12 +85,12 @@ with st.sidebar:
     stop_btn  = c2.button("⏹ Stop",  use_container_width=True,
                            disabled=not locked)
 
-# ── Start handler ─────────────────────────────────────────────────────────────
+# ── Start ─────────────────────────────────────────────────────────────────────
 if start_btn and not st.session_state.running:
     config.CONFIDENCE_THRESHOLD = conf_thr
-    config.LOW_THRESHOLD  = low_thr
-    config.HIGH_THRESHOLD = high_thr
-    config.ALERT_THRESHOLD = high_thr
+    config.LOW_THRESHOLD        = low_thr
+    config.HIGH_THRESHOLD       = high_thr
+    config.ALERT_THRESHOLD      = high_thr
     try:
         st.session_state.detector = PersonDetector()
         st.session_state.tracker  = PersonTracker()
@@ -105,23 +101,23 @@ if start_btn and not st.session_state.running:
         )
         cap = cv2.VideoCapture(video_source)
         if not cap.isOpened():
-            st.error(f"❌ Cannot open source: {video_source}")
+            st.error(f"❌ Cannot open: {video_source}")
         else:
-            st.session_state.cap = cap
-            st.session_state.count_history.clear()
-            st.session_state.frame_idx = 0
-            st.session_state.running = True
-    except Exception as exc:
-        st.error(f"Init error: {exc}")
+            st.session_state.cap           = cap
+            st.session_state.count_history = []
+            st.session_state.frame_idx     = 0
+            st.session_state.running       = True
+    except Exception as e:
+        st.error(f"Init error: {e}")
 
-# ── Stop handler ──────────────────────────────────────────────────────────────
+# ── Stop ──────────────────────────────────────────────────────────────────────
 if stop_btn and st.session_state.running:
     st.session_state.running = False
     if st.session_state.cap:
         st.session_state.cap.release()
         st.session_state.cap = None
 
-# ── Layout ────────────────────────────────────────────────────────────────────
+# ── Layout skeleton ───────────────────────────────────────────────────────────
 st.title("👥 Crowd Management System")
 st.caption("Real-time detection · tracking · density classification")
 
@@ -131,12 +127,34 @@ density_slot = col_b.empty()
 alert_slot   = col_c.empty()
 
 st.divider()
+
 feed_col, chart_col = st.columns([2, 1])
+feed_col.subheader("📷 Live Feed")
 frame_slot = feed_col.empty()
+chart_col.subheader("📈 Count History")
 chart_slot = chart_col.empty()
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helper functions ──────────────────────────────────────────────────────────
 _DCOL = {"LOW": "#28a745", "MEDIUM": "#fd7e14", "HIGH": "#dc3545"}
+
+
+def frame_to_b64(bgr_frame: np.ndarray) -> str:
+    """Encode a BGR OpenCV frame to a base64 JPEG data-URI string."""
+    ok, buf = cv2.imencode(".jpg", bgr_frame,
+                           [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        return ""
+    return base64.b64encode(buf.tobytes()).decode("utf-8")
+
+
+def show_frame(slot, bgr_frame: np.ndarray):
+    """Display frame via base64 HTML — bypasses Streamlit media file storage."""
+    b64 = frame_to_b64(bgr_frame)
+    slot.markdown(
+        f'<img src="data:image/jpeg;base64,{b64}" class="live-img"/>',
+        unsafe_allow_html=True,
+    )
+
 
 def render_metrics(count, density, alert):
     count_slot.markdown(f"""
@@ -158,23 +176,22 @@ def render_metrics(count, density, alert):
         unsafe_allow_html=True,
     )
 
+
 def render_chart(history: list):
-    """Render count history using a plain integer x-axis (no datetime)."""
     if len(history) < 2:
         chart_slot.info("Collecting data…")
         return
-    # Keep last 120 points so the chart stays readable
-    tail = history[-120:]
-    df = pd.DataFrame({"Count": tail})   # integer index 0..N — no datetime
-    chart_col.subheader("📈 Count History")
+    df = pd.DataFrame({"Count": history[-120:]})   # integer index, safe for Vega
     chart_slot.line_chart(df, height=280)
 
-def placeholder_frame(msg="Camera not running"):
+
+def placeholder_frame(msg="Press Start"):
     img = np.zeros((480, 640, 3), dtype=np.uint8)
     img[:] = (22, 27, 34)
-    cv2.putText(img, msg, (40, 240),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (88, 166, 255), 2)
+    cv2.putText(img, msg, (80, 240),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (88, 166, 255), 2)
     return img
+
 
 def annotate(frame, tracks, alert):
     color = config.BOX_COLOR_ALERT if alert else config.BOX_COLOR_NORMAL
@@ -188,11 +205,10 @@ def annotate(frame, tracks, alert):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
     return frame
 
-# ── Idle state ────────────────────────────────────────────────────────────────
+
+# ── IDLE ──────────────────────────────────────────────────────────────────────
 if not st.session_state.running:
-    feed_col.subheader("📷 Live Feed")
-    frame_slot.image(placeholder_frame(), channels="BGR",
-                     use_container_width=True)
+    show_frame(frame_slot, placeholder_frame())
     render_metrics(
         st.session_state.last_count,
         st.session_state.last_density,
@@ -201,7 +217,7 @@ if not st.session_state.running:
     render_chart(st.session_state.count_history)
     st.stop()
 
-# ── LIVE: process one frame then rerun ────────────────────────────────────────
+# ── LIVE: one frame → render → rerun ─────────────────────────────────────────
 cap = st.session_state.cap
 ret, frame = cap.read()
 
@@ -221,25 +237,21 @@ count   = result["count"]
 density = result["density"]
 alert   = result["alert"]
 
-# Persist state
+# Persist
 st.session_state.last_count   = count
 st.session_state.last_density = density
 st.session_state.last_alert   = alert
 st.session_state.count_history.append(count)
-st.session_state.frame_idx += 1
+st.session_state.frame_idx   += 1
 
-# Draw
+# Render
 frame = annotate(frame, tracks, alert)
-rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-feed_col.subheader("📷 Live Feed")
-frame_slot.image(rgb, channels="RGB", use_container_width=True)
+show_frame(frame_slot, frame)          # ← base64, no media file storage
 render_metrics(count, density, alert)
 
-# Only redraw chart every 5 frames to reduce CPU load
 if st.session_state.frame_idx % 5 == 0:
     render_chart(st.session_state.count_history)
 
-# Small sleep to keep CPU usage sane, then trigger next frame
+# Throttle to ~25 fps then trigger next frame
 time.sleep(0.04)
 st.rerun()
