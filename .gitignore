@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Runtime / generated files
+crowd_log.csv
+*.log
+
+# YOLOv8 model weights (large binary — download on first run)
+*.pt
+*.onnx
+
+# Ultralytics cache
+runs/
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
