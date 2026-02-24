@@ -343,13 +343,22 @@ _CHART_LAYOUT = dict(
 )
 
 def build_line_chart(history: list) -> go.Figure:
-    n = len(history)
+    # ── CLEAN DATA: replace any None / NaN / inf with 0 ──────────────────────
+    clean = []
+    for h in history:
+        if h is None or not isinstance(h, (int, float)):
+            clean.append(0)
+        elif np.isinf(h) or np.isnan(h):
+            clean.append(0)
+        else:
+            clean.append(int(h))
+
+    n  = len(clean)
     xs = list(range(n))
-    ys = history
     fig = go.Figure()
     if n > 1:
         fig.add_trace(go.Scatter(
-            x=xs, y=ys, mode="lines",
+            x=xs, y=clean, mode="lines",
             line=dict(color="#58A6FF", width=2.5, shape="spline"),
             fill="tozeroy",
             fillcolor="rgba(88,166,255,0.08)",
@@ -519,9 +528,10 @@ dets   = st.session_state.detector.detect(frame)
 tracks = st.session_state.tracker.update(dets, frame)
 result = st.session_state.analyzer.analyze(tracks)
 
-count   = result["count"]
-density = result["density"]
-alert   = result["alert"]
+# ── EXTRA SAFETY: use .get() so a bad result dict never KeyErrors ──────────
+count   = result.get("count",   0)
+density = result.get("density", "LOW")
+alert   = result.get("alert",   False)
 
 # FPS
 ft = st.session_state.fps_times
@@ -533,9 +543,15 @@ st.session_state.last_count   = count
 st.session_state.last_density = density
 st.session_state.last_alert   = alert
 st.session_state.last_fps     = fps
+# ── SAFE COUNT guard before storing ─────────────────────────────────────────
+if count is None or not isinstance(count, (int, float)) \
+        or np.isnan(count) or np.isinf(count):
+    count = 0
+count = int(count)   # ensure plain int
+
 if count > st.session_state.peak_count:
     st.session_state.peak_count = count
-st.session_state.count_history.append(count)
+st.session_state.count_history.append(count)          # always a clean int
 st.session_state.density_tally[density] += 1
 st.session_state.frame_idx += 1
 
