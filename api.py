@@ -76,13 +76,14 @@ def process_video():
         fps = 1 / (curr_time - start_time) if (curr_time - start_time) > 0 else 0
         start_time = curr_time
         
-        # Draw on frame (for streaming)
-        for t in tracks:
-            x1, y1, x2, y2 = t["bbox"]
-            color = config.BOX_COLOR_ALERT if stats["alert"] else config.BOX_COLOR_NORMAL
-            cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, config.BOX_THICKNESS)
-            cv2.putText(frame_resized, f"ID: {t['track_id']}", (x1, y1 - 5), 
-                        cv2.FONT_HERSHEY_SIMPLEX, config.FONT_SCALE, color, 1)
+        # Draw on frame (only for technical modes like 'event')
+        if state.latest_stats["mode"] == "event":
+            for t in tracks:
+                x1, y1, x2, y2 = t["bbox"]
+                color = config.BOX_COLOR_ALERT if stats["alert"] else config.BOX_COLOR_NORMAL
+                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, config.BOX_THICKNESS)
+                cv2.putText(frame_resized, f"ID: {t['track_id']}", (x1, y1 - 5), 
+                            cv2.FONT_HERSHEY_SIMPLEX, config.FONT_SCALE, color, 1)
 
         # Update latest state
         state.latest_stats.update(stats)

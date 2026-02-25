@@ -8,20 +8,6 @@ import os
 from datetime import datetime
 import config
 
-
-# ── Density labels ────────────────────────────────────────────────────────────
-DENSITY_LOW    = "LOW"
-DENSITY_MEDIUM = "MEDIUM"
-DENSITY_HIGH   = "HIGH"
-
-# ── Colour tiers (for external display components) ────────────────────────────
-DENSITY_COLOR = {
-    DENSITY_LOW:    "#28a745",   # green
-    DENSITY_MEDIUM: "#fd7e14",   # orange
-    DENSITY_HIGH:   "#dc3545",   # red
-}
-
-
 class CrowdAnalyzer:
     """
     Stateless helper that converts a list of confirmed tracks into:
@@ -29,6 +15,8 @@ class CrowdAnalyzer:
         - density label
         - alert flag
         - peak count
+        - wait time (gamified)
+        - mode-specific messages
 
     Optionally logs each reading to a CSV file.
     """
@@ -53,7 +41,7 @@ class CrowdAnalyzer:
 
     def analyze(self, tracks: list) -> dict:
         """
-        Analyse a list of confirmed tracks.
+        Analyse a list of confirmed tracks with gamified metrics.
         """
         count   = len(tracks)
         density = self._classify(count)
@@ -62,6 +50,26 @@ class CrowdAnalyzer:
         if count > self.peak_count:
             self.peak_count = count
 
+        # Gamified Metrics
+        wait_time = count * 2 # 2 mins per person
+        
+        # Mode-specific Labels/Messages
+        message = ""
+        if self.mode == "canteen":
+            if count < self.low_threshold:
+                message = "Good time to go"
+            elif count <= self.high_threshold:
+                message = "Moderately busy"
+            else:
+                message = "Avoid now"
+        elif self.mode == "shop":
+            message = "Peak time usually 6 PM - 8 PM"
+        elif self.mode == "event":
+            if alert:
+                message = "CRITICAL: OVERCROWDED"
+            else:
+                message = "All sections monitored"
+        
         if config.ENABLE_CSV_LOGGING and self._csv_ready:
             self._log_csv(count, density, alert)
 
@@ -70,7 +78,10 @@ class CrowdAnalyzer:
             "density": density,
             "alert":   alert,
             "peak_count": self.peak_count,
-            "mode": self.mode
+            "mode": self.mode,
+            "wait_time": wait_time,
+            "message": message,
+            "availability": "Seats available" if count < self.high_threshold else "Almost full"
         }
 
     def update_mode(self, new_mode: str):

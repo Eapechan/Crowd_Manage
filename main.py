@@ -156,9 +156,6 @@ def run(source) -> None:
                     scaled_bbox = [x1, y1, cw, ch]
                     scaled_detections.append((scaled_bbox, conf, cls))
 
-            if len(scaled_detections) > 0:
-                print(f"[DEBUG] Valid detections scaled: {len(scaled_detections)}")
-
             tracks = tracker.update(scaled_detections, frame)
             result = analyzer.analyze(tracks)
 

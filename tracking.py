@@ -31,6 +31,7 @@ class PersonTracker:
         """
         Feed new detections into the tracker and return only stable, confirmed tracks.
         """
+        # deep-sort-realtime expects the raw detections as-is
         raw_tracks = self.tracker.update_tracks(detections, frame=frame)
 
         confirmed = []

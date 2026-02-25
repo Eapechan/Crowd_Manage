@@ -30,6 +30,7 @@ runs/
 # OS
 .DS_Store
 Thumbs.db
+<<<<<<< HEAD
 
 # Node / Frontend
 node_modules/
@@ -37,3 +38,5 @@ frontend/node_modules/
 frontend/dist/
 .env
 .env.local
+=======
+>>>>>>> d97008c3f0e8eee2f7e2b6befcba38ec5661e3d0
